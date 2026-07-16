@@ -1,0 +1,91 @@
+# ═══════════════════════════════════════════════════════════════════════
+#  FuseViz Enterprise — docker-compose.yml (C++20 Backend)
+# ═══════════════════════════════════════════════════════════════════════
+
+version: "3.9"
+
+services:
+  # ── FuseViz C++20 Daemon ──
+  fuseviz:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    container_name: fuseviz-daemon
+    restart: unless-stopped
+    ports:
+      - "8080:8080"  # WebSocket + REST API
+      - "3000:3000"  # Next.js UI
+    volumes:
+      - /sys/kernel/debug:/sys/kernel/debug:rw
+      - /dev/fuse:/dev/fuse:rw
+      - fuseviz-data:/var/lib/fuseviz
+      - /mnt/fuseviz:/mnt/fuseviz:shared
+    cap_add:
+      - CAP_SYS_ADMIN
+      - CAP_SYS_PTRACE
+      - CAP_BPF
+      - CAP_PERFMON
+    security_opt:
+      - apparmor:unconfined
+    environment:
+      - FUSEVIZ_DB_PATH=/var/lib/fuseviz/events.db
+      - FUSEVIZ_BPF_OBJ=/opt/fuseviz/ebpf/fuse_trace.bpf.o
+      - FUSEVIZ_OLLAMA_URL=http://ollama:11434
+      - FUSEVIZ_OLLAMA_MODEL=llama3
+      - FUSEVIZ_WS_SECRET=${FUSEVIZ_WS_SECRET:-fuseviz-dev-key}
+    depends_on:
+      ollama:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    networks:
+      - fuseviz-net
+
+  # ── Ollama AI (Local LLM for threat analysis) ──
+  ollama:
+    image: ollama/ollama:0.5.7
+    container_name: fuseviz-ollama
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama-data:/root/.ollama
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434/api/version"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - fuseviz-net
+
+  # ── Ollama Model Puller ──
+  ollama-pull:
+    image: curlimages/curl:latest
+    container_name: fuseviz-ollama-pull
+    restart: "no"
+    depends_on:
+      ollama:
+        condition: service_healthy
+    entrypoint: >
+      sh -c '
+        echo "Pulling llama3 model..."
+        curl -s http://ollama:11434/api/pull -d "{\"name\":\"llama3\"}"
+        echo "Model pull complete"
+      '
+    networks:
+      - fuseviz-net
+
+volumes:
+  fuseviz-data:
+    driver: local
+  ollama-data:
+    driver: local
+
+networks:
+  fuseviz-net:
+    driver: bridge

@@ -1,0 +1,14 @@
+node_modules
+.next
+.git
+*.log
+.env
+.env.*
+*.db
+*.db-shm
+*.db-wal
+*.bpf.o
+vmlinux.h
+build
+dist
+out
